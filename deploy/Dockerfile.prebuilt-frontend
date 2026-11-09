@@ -4,8 +4,8 @@ ARG GOPROXY=https://goproxy.cn,direct
 ARG GOSUMDB=sum.golang.google.cn
 
 FROM ${GOLANG_IMAGE} AS backend-builder
-ARG VERSION=0.2.20-media-canvas
-ARG COMMIT=v0.2.20-media-canvas
+ARG VERSION=0.2.20-media-canvas-billing
+ARG COMMIT=v0.2.20-media-canvas-billing
 ARG BUILD_TYPE=source
 ARG DATE
 ARG GOPROXY

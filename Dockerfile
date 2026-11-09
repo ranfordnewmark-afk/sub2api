@@ -53,8 +53,8 @@ RUN pnpm run build
 FROM --platform=${BUILDPLATFORM} ${GOLANG_IMAGE} AS backend-builder
 
 # Build arguments for version info (set by CI)
-ARG VERSION=0.2.20-media-canvas
-ARG COMMIT=v0.2.20-media-canvas
+ARG VERSION=0.2.20-media-canvas-billing
+ARG COMMIT=v0.2.20-media-canvas-billing
 ARG DATE
 ARG GOPROXY
 ARG GOSUMDB

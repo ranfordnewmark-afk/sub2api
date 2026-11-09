@@ -239,12 +239,14 @@ func TestForwardGrokMediaContentFollowsAuthenticatedSub2APIRelay(t *testing.T) {
 			svc := &OpenAIGatewayService{cfg: &config.Config{}, httpUpstream: upstream}
 			c, recorder := grokMediaContentTestContext(http.MethodGet, "https://api.example/v1/videos/task-1/content", nil)
 
-			_, err := svc.ForwardGrokMedia(
+			result, err := svc.ForwardGrokMedia(
 				context.Background(), c, grokMediaContentTestAccount(),
 				GrokMediaEndpointVideoContent, "task-1", nil, "",
 			)
 
 			require.NoError(t, err)
+			require.NotNil(t, result)
+			require.Equal(t, 1, result.VideoCount)
 			require.Equal(t, http.StatusOK, recorder.Code)
 			require.Equal(t, "video-payload", recorder.Body.String())
 			require.Len(t, upstream.requests, 2)
