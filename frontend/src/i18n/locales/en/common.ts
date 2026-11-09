@@ -166,6 +166,7 @@ export default {
     dashboard: 'Dashboard',
     announcements: 'Announcements',
     apiKeys: 'API Keys',
+    mediaCanvas: 'Media Canvas',
     batchImage: 'Batch Images',
     usage: 'Usage',
     redeem: 'Redeem',

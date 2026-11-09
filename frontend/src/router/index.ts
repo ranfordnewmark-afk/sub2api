@@ -216,6 +216,17 @@ const routes: RouteRecordRaw[] = [
     }
   },
   {
+    path: '/media-canvas',
+    name: 'MediaCanvas',
+    component: () => import('@/views/user/MediaCanvasView.vue'),
+    meta: {
+      requiresAuth: true,
+      requiresAdmin: false,
+      title: 'Media Canvas',
+      titleKey: 'nav.mediaCanvas'
+    }
+  },
+  {
     path: '/batch-image',
     name: 'BatchImageGuide',
     alias: '/docs/batch-image',

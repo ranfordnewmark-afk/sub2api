@@ -38,19 +38,31 @@ func TestIsGrokVideoStatusBillable(t *testing.T) {
 		"model":"grok-imagine-video-1.5",
 		"video":{"url":"https://vidgen.x.ai/x.mp4","duration":8,"respect_moderation":true}
 	}`)))
+	// Pool success shape: status=completed + relative content URL.
+	require.True(t, IsGrokVideoStatusBillable([]byte(`{
+		"status":"completed",
+		"video":{"duration":10,"respect_moderation":true,"url":"/v1/videos/task-1/content"}
+	}`)))
 
-	// Official non-success states
+	for _, status := range []string{"completed", "complete", "succeeded", "success", "done", "finished", "Completed", " DONE ", "Finished"} {
+		body := []byte(`{"status":"` + status + `","video":{"url":"/v1/videos/task-1/content","duration":10}}`)
+		require.Truef(t, IsGrokVideoStatusBillable(body), "status %q should be billable", status)
+	}
+
+	// Non-success states stay unbilled even when a URL is present.
 	require.False(t, IsGrokVideoStatusBillable(nil))
-	require.False(t, IsGrokVideoStatusBillable([]byte(`{"status":"pending"}`)))
-	require.False(t, IsGrokVideoStatusBillable([]byte(`{"status":"expired"}`)))
-	require.False(t, IsGrokVideoStatusBillable([]byte(`{"status":"failed"}`)))
-	// done without video.url is not billable
+	require.False(t, IsGrokVideoStatusBillable([]byte(`{`)))
+	for _, status := range []string{"pending", "processing", "expired", "failed", "error", "cancelled", "canceled", "rejected", ""} {
+		body := []byte(`{"status":"` + status + `","video":{"url":"/v1/videos/task-1/content","duration":10}}`)
+		require.Falsef(t, IsGrokVideoStatusBillable(body), "status %q must not be billable", status)
+	}
+	// Success without a usable video.url is not billable.
 	require.False(t, IsGrokVideoStatusBillable([]byte(`{"status":"done"}`)))
-	// URL alone (legacy/non-official shapes) is not enough
+	require.False(t, IsGrokVideoStatusBillable([]byte(`{"status":"completed","video":{"duration":10}}`)))
+	require.False(t, IsGrokVideoStatusBillable([]byte(`{"status":"completed","video":{"url":"   ","duration":10}}`)))
+	// URL alone (legacy/non-official shapes) is not enough.
 	require.False(t, IsGrokVideoStatusBillable([]byte(`{"url":"https://example.com/v.mp4"}`)))
 	require.False(t, IsGrokVideoStatusBillable([]byte(`{"download_url":"/v1/videos/task/content"}`)))
-	// "completed" is not the official enum value
-	require.False(t, IsGrokVideoStatusBillable([]byte(`{"status":"completed","video":{"url":"https://vidgen.x.ai/x.mp4"}}`)))
 }
 
 func TestExtractGrokVideoBillingFromStatusBodyPrefersUpstreamParams(t *testing.T) {
@@ -97,15 +109,35 @@ func TestExtractGrokVideoBillingFromStatusBodyFallsBackToPending(t *testing.T) {
 	require.Equal(t, 10, result.VideoDurationSeconds)
 }
 
-func TestExtractGrokVideoBillingRejectsNonDoneStatus(t *testing.T) {
+func TestExtractGrokVideoBillingFromCompletedPoolStatus(t *testing.T) {
+	t.Parallel()
+	pending := &GrokVideoPendingBilling{
+		Model:                "create-model",
+		BillingModel:         "create-billing",
+		VideoResolution:      VideoBillingResolution720P,
+		VideoDurationSeconds: 8,
+	}
+	// Live pool body: status completed, relative content URL, upstream duration.
+	body := []byte(`{"status":"completed","video":{"duration":10,"respect_moderation":true,"url":"/v1/videos/task-1/content"}}`)
+	result := ExtractGrokVideoBillingFromStatusBody(body, pending, "task-1")
+	require.NotNil(t, result)
+	require.Equal(t, 1, result.VideoCount)
+	require.Equal(t, 10, result.VideoDurationSeconds)
+	require.Equal(t, VideoBillingResolution720P, result.VideoResolution)
+	require.Equal(t, "create-billing", result.BillingModel)
+}
+
+func TestExtractGrokVideoBillingRejectsNonSuccessStatus(t *testing.T) {
 	t.Parallel()
 	pending := &GrokVideoPendingBilling{Model: "m", VideoDurationSeconds: 8, VideoResolution: "720p"}
+	for _, status := range []string{"pending", "failed", "expired", "cancelled", "canceled", "error"} {
+		require.Nilf(t, ExtractGrokVideoBillingFromStatusBody(
+			[]byte(`{"status":"`+status+`","video":{"url":"https://vidgen.x.ai/x.mp4","duration":8}}`),
+			pending, "req",
+		), "status %q must not bill", status)
+	}
 	require.Nil(t, ExtractGrokVideoBillingFromStatusBody(
-		[]byte(`{"status":"pending","video":{"url":"https://vidgen.x.ai/x.mp4","duration":8}}`),
-		pending, "req",
-	))
-	require.Nil(t, ExtractGrokVideoBillingFromStatusBody(
-		[]byte(`{"status":"completed","video":{"url":"https://vidgen.x.ai/x.mp4","duration":8}}`),
+		[]byte(`{"status":"completed","video":{"duration":8}}`),
 		pending, "req",
 	))
 }
@@ -131,7 +163,7 @@ func TestGrokMediaUsageFromResponseVideoStatusBillsOnOfficialDone(t *testing.T) 
 	require.Equal(t, 9, meta.VideoDurationSeconds)
 	require.Equal(t, "grok-imagine-video-1.5", meta.Model)
 
-	// Official non-done must not set billable units.
+	// Official non-success must not set billable units.
 	pendingOnly := grokMediaUsageFromResponse(
 		GrokMediaEndpointVideoStatus,
 		GrokMediaRequestInfo{},
@@ -139,11 +171,18 @@ func TestGrokMediaUsageFromResponseVideoStatusBillsOnOfficialDone(t *testing.T) 
 	)
 	require.Equal(t, 0, pendingOnly.VideoCount)
 
-	// completed is not official done.
 	completed := grokMediaUsageFromResponse(
 		GrokMediaEndpointVideoStatus,
 		GrokMediaRequestInfo{},
-		[]byte(`{"status":"completed","video":{"url":"https://vidgen.x.ai/a.mp4","duration":9}}`),
+		[]byte(`{"status":"completed","video":{"url":"/v1/videos/task-1/content","duration":10}}`),
 	)
-	require.Equal(t, 0, completed.VideoCount)
+	require.Equal(t, 1, completed.VideoCount)
+	require.Equal(t, 10, completed.VideoDurationSeconds)
+
+	failed := grokMediaUsageFromResponse(
+		GrokMediaEndpointVideoStatus,
+		GrokMediaRequestInfo{},
+		[]byte(`{"status":"failed","video":{"url":"/v1/videos/task-1/content","duration":10}}`),
+	)
+	require.Equal(t, 0, failed.VideoCount)
 }
